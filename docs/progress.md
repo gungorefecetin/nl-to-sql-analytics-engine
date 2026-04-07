@@ -50,7 +50,7 @@
 
 ---
 
-## Day 1 — [DATE]
+## Day 1 — 2026-04-07
 
 ### Plan
 **Objective:** Backend foundation — Docker, DB, data loading, Spring Boot scaffolding, schema introspection
@@ -74,16 +74,27 @@
 
 ### End of Day
 **Completed:**
-- [ ] *fill in at end of day*
+- [x] `docker compose up` → clean start
+- [x] Olist data verified (99,441 orders, 1.55M total rows across 9 tables)
+- [x] `/api/schema` returns correct JSON
+- [x] Dual datasource works (admin via JPA validation, readonly via introspection service)
+
+Also completed ahead of schedule:
+- [x] QueryHistory + SchemaCache JPA entities and repositories
+- [x] SchemaIntrospectionService (startup-time `information_schema` read → `schema_cache` upsert)
+- [x] SchemaController with `GET /api/schema` endpoint
 
 **Decisions Made:**
-- *fill in at end of day*
+- `ddl-auto: validate` instead of `update` — `init.sql` is the single source of truth for schema, Hibernate only verifies the mapping matches
+- Test via Docker instead of local JDK — keeps the dev environment reproducible, no local Java install needed
 
 **Learned:**
-- *fill in at end of day*
+- Docker entrypoint scripts run alphabetically — naming them `01-init.sql`, `02-seed.sh` controls execution order reliably
+- Spring Boot's `@EventListener(ApplicationReadyEvent)` fires after all beans are wired, making it the right hook for schema introspection (not `@PostConstruct`, which fires too early for datasource availability)
+- With dual datasources, Spring Boot Actuator health auto-detects both and reports them separately — no extra config needed
 
 **Tomorrow:**
-- *fill in at end of day*
+- Day 2 — OpenAI client, SqlValidationService, SqlExecutionService, PromptBuilderService, QueryOrchestrationService, `POST /api/query` endpoint, retry logic, query history persistence
 
 ---
 
