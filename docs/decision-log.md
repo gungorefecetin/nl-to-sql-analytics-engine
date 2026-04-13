@@ -139,4 +139,27 @@
 
 ---
 
+## DL-007: Word-Boundary Regex for SQL Keyword Blocklist
+
+**Date:** Day 2 (Implementation)
+**Context:** `SqlValidationService` blocks dangerous SQL keywords (INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, etc.) in AI-generated SQL. Naive substring matching (`String.contains()`) would false-positive on legitimate column names: `updated_at` contains UPDATE, `execution_time_ms` contains EXECUTE, `created_at` contains CREATE, `is_deleted` contains DELETE. These columns exist in the Olist dataset and app tables.
+
+**Decision:** Use `\b` word boundaries for SQL keyword matching (`\bUPDATE\b`, `\bDELETE\b`), and literal `Pattern.quote()` matching for symbol/function tokens (`--`, `/*`, `xp_`, `pg_read_file`). Both are compiled as case-insensitive `Pattern` objects at class load time.
+
+**Alternatives:**
+- **Naive substring matching (`toUpperCase().contains()`):** Zero-dependency, trivial to implement. But produces false positives on real column names — `SELECT updated_at FROM schema_cache` would be incorrectly rejected.
+- **SQL parser (JSqlParser):** Would correctly distinguish keywords from identifiers in all cases, including creative obfuscation. But it's a heavyweight dependency (~1.5MB), overkill for a blocklist at the boundary where a read-only DB role is the true security layer.
+- **Tokenizer approach (split on whitespace/punctuation, check tokens):** No regex, but fragile — fails on `UPDATE(` (no space) or quoted identifiers.
+
+**Tradeoffs:**
+- (+) Zero false positives on real column names — verified with tests for `execution_time_ms`, `updated_at`, `created_at`, `is_deleted`
+- (+) Zero extra dependencies — uses `java.util.regex` only
+- (+) Patterns compiled once at class load, negligible runtime cost
+- (−) Regex-based, not a true SQL parser — wouldn't catch creative obfuscation (e.g., `UP/**/DATE`) that a parser would
+- (−) Word boundary `\b` depends on `\w` character class — safe for SQL keywords (all alphabetic) but wouldn't work for tokens containing special chars (handled separately with literal matching)
+
+**Reversal trigger:** If we ever allow user-provided SQL (currently AI-only, so the attack surface is limited to prompt injection) or if the read-only DB role (DL-001) is removed, swap to a real SQL parser like JSqlParser. The regex approach is sufficient as one layer of defense-in-depth, not as the sole security boundary.
+
+---
+
 *New decisions will be added during the build. The "Reversal trigger" section of each entry is especially important — it's a ready-made answer for "when would you change this decision?" in interviews.*

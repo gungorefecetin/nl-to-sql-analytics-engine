@@ -29,5 +29,14 @@ management:
     health:
       show-details: always
 
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  model: ${OPENAI_MODEL:gpt-4o}
+  max-tokens: ${OPENAI_MAX_TOKENS:1000}
+  temperature: ${OPENAI_TEMPERATURE:0.1}
+
+querymind:
+  max-execution-time-seconds: ${MAX_QUERY_EXECUTION_TIME_SECONDS:30}
+
 server:
   port: 8080

@@ -29,6 +29,7 @@ services:
       DB_PORT: 5432
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       READONLY_PASSWORD: ${READONLY_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     ports:
       - "8080:8080"
     depends_on:
