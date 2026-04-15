@@ -1,5 +1,6 @@
 package com.querymind.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -28,23 +29,37 @@ public class OpenAIClient {
         this.objectMapper = objectMapper;
     }
 
+    public record Message(String role, String content) {}
+
     /**
-     * Sends a chat completion request to OpenAI and returns the assistant's reply as a plain string.
-     *
-     * @param systemPrompt the system-level instruction (e.g., "You are a PostgreSQL expert...")
-     * @param userPrompt   the user-level message (schema context + natural language question)
-     * @return the model's response text (expected to be a SQL query)
-     * @throws OpenAIClientException on any failure — network, rate limit, malformed response
+     * Convenience method for single-turn conversations.
+     * Delegates to the multi-message overload.
      */
     public String chatCompletion(String systemPrompt, String userPrompt) {
+        return chatCompletion(systemPrompt, List.of(new Message("user", userPrompt)));
+    }
+
+    /**
+     * Sends a chat completion request with full conversation history.
+     * Used by the retry loop to include the assistant's prior bad SQL + error correction.
+     *
+     * @param systemPrompt the system-level instruction
+     * @param messages     ordered conversation: user → assistant → user → ...
+     * @return the model's response text
+     * @throws OpenAIClientException on any failure
+     */
+    public String chatCompletion(String systemPrompt, List<Message> messages) {
+        List<Map<String, String>> apiMessages = new ArrayList<>();
+        apiMessages.add(Map.of("role", "system", "content", systemPrompt));
+        for (Message msg : messages) {
+            apiMessages.add(Map.of("role", msg.role(), "content", msg.content()));
+        }
+
         Map<String, Object> requestBody = Map.of(
                 "model", config.getModel(),
                 "max_tokens", config.getMaxTokens(),
                 "temperature", config.getTemperature(),
-                "messages", List.of(
-                        Map.of("role", "system", "content", systemPrompt),
-                        Map.of("role", "user", "content", userPrompt)
-                )
+                "messages", apiMessages
         );
 
         String responseJson;

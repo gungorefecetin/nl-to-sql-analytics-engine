@@ -162,4 +162,47 @@
 
 ---
 
+## DL-008: Full Schema in Every Prompt (No Retrieval / No Filtering)
+
+**Date:** Day 2 (Implementation)
+**Context:** `PromptBuilderService` constructs the GPT-4o prompt for NL→SQL translation. Key question: which tables to include in the prompt? The Olist dataset has 9 tables with ~55 total columns. The full schema formatted as text is ~1,200–1,500 tokens — about 1.7% of GPT-4o's 128K context window.
+
+**Decision:** Include all 9 Olist tables in every prompt. Cap sample values per column to distinct values from 3 sample rows, only included if the column has ≤10 distinct values in the sample (enum-like heuristic). Total prompt size: ~2,200 tokens. No truncation or dynamic budget needed.
+
+**Alternatives:**
+- **Keyword-based table filtering:** Match question words to table/column names, only include "relevant" tables. Fragile — "which cities have the most sellers?" needs customers + orders + sellers, hard to predict from keywords alone. Risk of missing a required table is high.
+- **Two-pass LLM call (classify then generate):** First GPT-4o call selects relevant tables, second generates SQL. More accurate filtering, but doubles latency (~4-8s → ~8-16s), breaks the <8s target (DL-002).
+- **Embedding similarity:** Pre-embed table descriptions, find nearest match to the question. Over-engineered for 9 tables — the embedding/retrieval infrastructure costs more than the tokens saved.
+
+**Tradeoffs:**
+- (+) Zero risk of missing a required table — GPT-4o is good at ignoring irrelevant context, but bad at generating SQL for tables it can't see
+- (+) Single LLM call preserves the latency budget (<8s target)
+- (+) Simplest implementation — no retrieval pipeline, no classification step
+- (−) Wastes ~2K tokens per call on irrelevant context (trivial at GPT-4o pricing: <$0.001/query)
+- (−) Won't scale to 50+ table datasets without revisiting
+
+**Reversal trigger:** If the dataset grows past ~20 tables or prompt exceeds ~4,000 tokens, add a table selection step (keyword-based first, embedding-based if that proves insufficient).
+
+---
+
+## DL-009: Multi-Turn Conversation History for SQL Retry Loop
+
+**Date:** Day 2 (Implementation)
+**Context:** When AI-generated SQL fails execution, the orchestrator re-calls GPT-4o with the PostgreSQL error message to request a correction. Two approaches: (A) multi-turn conversation where the assistant's original bad SQL appears in conversation history, followed by a user message with the error, or (B) single-turn with the error folded into a new flat prompt.
+
+**Decision:** Option A — multi-turn conversation history. `OpenAIClient` gains a `Message` record and an overloaded `chatCompletion(systemPrompt, List<Message>)` method. The original two-string `chatCompletion(system, user)` stays as a convenience that delegates to the new method. The orchestrator builds up the message list across retries: user prompt → assistant SQL → user error correction → assistant fixed SQL → ...
+
+**Alternatives:**
+- **Option B (flat prompt with error appended):** Simpler interface — `OpenAIClient` stays as-is, the orchestrator appends `"\n\nPREVIOUS ATTEMPT:\n{sql}\n\nERROR: {pg_error}\n\nFix the SQL query."` to the user prompt string. Lower token cost per retry. But the model may rewrite the query from scratch instead of making a targeted fix, potentially introducing new errors.
+
+**Tradeoffs:**
+- (+) GPT-4o produces more surgical fixes when it sees its own prior output in the assistant role — this is the recommended multi-turn pattern for error correction
+- (+) Each retry preserves the full conversation context, so the model doesn't repeat the same mistake
+- (−) ~2-3x token cost on retries (negligible at GPT-4o pricing — ~$0.001 per retry, max 2 retries)
+- (−) `OpenAIClient` interface gains complexity (overloaded method + Message record)
+
+**Reversal trigger:** If production logs show GPT-4o consistently rewriting queries from scratch on retry (ignoring its own prior output), simplify to Option B — the extra interface complexity isn't paying for itself.
+
+---
+
 *New decisions will be added during the build. The "Reversal trigger" section of each entry is especially important — it's a ready-made answer for "when would you change this decision?" in interviews.*
