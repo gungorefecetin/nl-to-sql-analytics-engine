@@ -157,7 +157,7 @@ Files added (12 new, 3 modified):
 
 ---
 
-## Day 3 — [DATE]
+## Day 3 — 2026-04-23
 
 ### Plan
 **Objective:** Intelligence layer — chart inference, insight generation, history endpoint, error handling
@@ -187,16 +187,31 @@ Files added (12 new, 3 modified):
 
 ### End of Day
 **Completed:**
-- [ ] *fill in at end of day*
+- [x] ChartTypeInferenceService with 16 unit tests (BAR, LINE, KPI, TABLE — PIE excluded per DL-003 refinement)
+- [x] QueryResponse enriched with chartType + chartData (single record, nullable fields, @JsonInclude NON_NULL)
+- [x] InsightGenerationService + `POST /api/insight` (result_data JSONB stored at query time per DL-011)
+- [x] `GET /api/query/history` with pagination (default 20, max 50, sort createdAt DESC)
+- [x] GlobalExceptionHandler with ResponseEnvelope — 6 exception types covered
+- [x] Rate limiter: in-memory sliding window, 20 req/min/IP with clock abstraction for testability
+- [x] Swagger UI live at `/swagger-ui/index.html` with all 4 endpoints annotated
+- [x] 68 tests passing, 0 failures
 
 **Decisions Made:**
-- *fill in at end of day*
+- DL-010: ResultSetExtractor for column metadata (getColumnLabel + raw jdbcType) — `queryForList` throws away the ResultSetMetaData, which is exactly the signal chart inference needs to distinguish temporal from numeric columns at the JDBC layer rather than re-deriving it from column names.
+- DL-011: Store first 5 result rows as JSONB in query_history for insight generation — re-executing the user's SQL at insight time would double every cost (latency, DB load, retry budget) and would diverge from what the user saw if the underlying data changed; storing the rendered top-5 freezes the exact payload the insight is describing.
+- ChartData as a single record with nullable fields over a sealed interface hierarchy (not DL-worthy — DTO shape, not architecture). Sealed types would force three wrapper classes and a discriminator for a frontend that already dispatches on `chartType`; the nullability cost is paid once by `@JsonInclude(NON_NULL)` and the Jackson output stays flat.
+- ResponseEnvelope explicit wrapping over ResponseBodyAdvice auto-wrapping (explicit is one line per method, doesn't interfere with actuator/Swagger). ResponseBodyAdvice silently intercepts every `@RestController` return, including the actuator JSON and springdoc's `/v3/api-docs`, and the only escape hatch is a hand-maintained deny-list — for four endpoints the explicit wrap is both less code and less magic.
 
 **Learned:**
-- *fill in at end of day*
+- `@JsonInclude(JsonInclude.Include.NON_NULL)` on a Java record is the cleanest way to get shape-polymorphic JSON from a single DTO — KPI results serialize as `{ metrics: [...] }`, bar/line as `{ xKey, yKey, rows }`, and table results omit `chartData` entirely, all without a sealed hierarchy or a custom serializer. The tests asserting `json.doesNotContain("\"xKey\"")` for KPI responses are what made this concrete — the NON_NULL rule is only load-bearing because the frontend dispatches on `chartType`, so the absent field is semantically meaningful, not just cosmetic.
+- Hibernate's JSONB mapping needs `@JdbcTypeCode(SqlTypes.JSON)` on the field, not just `columnDefinition = "jsonb"` — without the JdbcTypeCode, Hibernate binds the value as `character varying` and PostgreSQL rejects it with `column "result_data" is of type jsonb but expression is of type character varying`. The columnDefinition only affects DDL generation, which we don't use (`ddl-auto: validate`), so it was doing nothing for us at runtime.
+- A `LongSupplier` injected into a service beats `Clock` or `System.currentTimeMillis()` for unit-testing time-dependent logic — the test uses a `long[] now = {t}` array and bumps `now[0]` directly to simulate the window advancing, no mocking framework, no `ThreadLocal`, no Instant conversion. Three tests (20 pass, 21 reject, window reset) fit in ~40 lines because the clock is just a lambda.
+- Spring's `@SpringBootTest` context failure threshold is a silent trap when running integration tests in a batch — one class failing to load (in our case `OpenAIClientIntegrationTest` with a fake API key) trips the threshold and every subsequent `@SpringBootTest` class fails with "threshold exceeded" instead of its real error. Had to run the first failing class in isolation to see the actual cause; the surfaced errors for the other 10 tests were purely cascading and had nothing to do with the tests themselves.
+- springdoc's `@Tag` + `@Operation` is enough annotation — no schema annotations needed on request/response DTOs. springdoc reflects on the record components directly and produces a correct OpenAPI schema (including generics like `ResponseEnvelope<QueryResponse>`) without any help. The temptation to annotate every field is a dead end on a 5-day project.
+- The OpenAPI spec at `/v3/api-docs` is a better correctness check than the Swagger UI page — one `curl | jq` shows every documented path, method, and summary in four lines and makes it immediately obvious if a controller was missed. The UI at `/swagger-ui/index.html` is for demos; the JSON is for verification.
 
 **Tomorrow:**
-- *fill in at end of day*
+- Day 4 — Frontend: Next.js 14 + TypeScript + Tailwind, Zustand store, QueryInput with example chips, all chart components (Recharts), DataTable (TanStack Table), SqlDisplay, LoadingState, end-to-end type question → see chart
 
 ---
 
