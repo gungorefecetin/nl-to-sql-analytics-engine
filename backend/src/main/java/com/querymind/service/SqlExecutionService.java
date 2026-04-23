@@ -1,5 +1,8 @@
 package com.querymind.service;
 
+import java.sql.ResultSetMetaData;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -31,17 +34,39 @@ public class SqlExecutionService {
      * Executes validated SQL on the read-only datasource.
      *
      * @param sql validated SQL (must have passed SqlValidationService first)
-     * @return result containing rows and elapsed time in milliseconds
+     * @return result containing column metadata, rows, and elapsed time
      * @throws SqlExecutionException on any failure — includes PG error message for retry loop
      */
-    public Result execute(String sql) {
+    public QueryResult execute(String sql) {
         log.debug("Executing SQL ({} chars)", sql.length());
         long start = System.currentTimeMillis();
         try {
-            List<Map<String, Object>> rows = readonlyJdbcTemplate.queryForList(sql);
+            QueryResult result = readonlyJdbcTemplate.query(sql, rs -> {
+                ResultSetMetaData meta = rs.getMetaData();
+                int columnCount = meta.getColumnCount();
+
+                // Extract column metadata once
+                List<ColumnMeta> columns = new ArrayList<>(columnCount);
+                for (int i = 1; i <= columnCount; i++) {
+                    columns.add(new ColumnMeta(meta.getColumnLabel(i), meta.getColumnType(i)));
+                }
+
+                // Iterate rows
+                List<Map<String, Object>> rows = new ArrayList<>();
+                while (rs.next()) {
+                    Map<String, Object> row = new LinkedHashMap<>(columnCount);
+                    for (int i = 1; i <= columnCount; i++) {
+                        row.put(columns.get(i - 1).name(), rs.getObject(i));
+                    }
+                    rows.add(row);
+                }
+
+                return new QueryResult(columns, rows);
+            });
             long elapsedMs = System.currentTimeMillis() - start;
-            log.debug("SQL executed: {} rows in {} ms", rows.size(), elapsedMs);
-            return new Result(rows, elapsedMs);
+            log.debug("SQL executed: {} rows, {} columns in {} ms",
+                    result.rows().size(), result.columns().size(), elapsedMs);
+            return new QueryResult(result.columns(), result.rows(), elapsedMs);
         } catch (DataAccessException e) {
             long elapsedMs = System.currentTimeMillis() - start;
             String pgError = extractMessage(e);
@@ -60,5 +85,12 @@ public class SqlExecutionService {
         return e.getMessage();
     }
 
-    public record Result(List<Map<String, Object>> rows, long executionTimeMs) {}
+    public record ColumnMeta(String name, int jdbcType) {}
+
+    public record QueryResult(List<ColumnMeta> columns, List<Map<String, Object>> rows, long executionTimeMs) {
+        /** Used by ResultSetExtractor lambda (before timing is known). */
+        QueryResult(List<ColumnMeta> columns, List<Map<String, Object>> rows) {
+            this(columns, rows, 0);
+        }
+    }
 }

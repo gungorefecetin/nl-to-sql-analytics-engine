@@ -2,6 +2,9 @@ package com.querymind.model.entity;
 
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -35,6 +38,10 @@ public class QueryHistory {
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 
+    @Column(name = "result_data", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String resultData;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -66,6 +73,9 @@ public class QueryHistory {
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+
+    public String getResultData() { return resultData; }
+    public void setResultData(String resultData) { this.resultData = resultData; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

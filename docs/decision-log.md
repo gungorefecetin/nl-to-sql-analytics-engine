@@ -205,4 +205,48 @@
 
 ---
 
+## DL-010: ResultSetExtractor for Column Metadata + Rows
+
+**Date:** Day 3 (Implementation)
+**Context:** `ChartTypeInferenceService` needs column names and JDBC types to decide chart type. The original `SqlExecutionService` used `JdbcTemplate.queryForList()` which returns `List<Map<String, Object>>` — column types and ordering are lost. Computed columns like `SUM(price) AS "Total Revenue"` have no type information, and `HashMap` key ordering is not guaranteed.
+
+**Decision:** Switch to `ResultSetExtractor`. Return a `QueryResult` record with `List<ColumnMeta(name, jdbcType)>` + `List<Map<String, Object>> rows`. Use `getColumnLabel()` (not `getColumnName()`) so aliases like `"Total Revenue"` are preserved. Store `jdbcType` as raw `int` from `java.sql.Types`.
+
+**Alternatives:**
+- **RowMapper with stateful metadata capture:** `RowMapper`'s contract is "map one row." Capturing `ResultSetMetaData` on the first invocation works mechanically but mixes concerns — the mapper becomes a side-effect-laden metadata extractor that happens to also map rows. Semantically wrong.
+- **`queryForList` + infer types from Java object classes:** Inspect `row.get(key).getClass()` to determine if a column is numeric, string, or temporal. Loses column ordering (HashMap), breaks on all-null columns (no object to inspect), and throws away JDBC metadata we already have inside the ResultSet.
+
+**Tradeoffs:**
+- (+) Single pass through the ResultSet — metadata and rows extracted in one callback
+- (+) Preserves column ordering (metadata reports columns in SELECT order)
+- (+) Handles computed columns correctly — `SUM(price)` reports as `NUMERIC`, not unknown
+- (+) Null values still have correct type info (metadata is independent of row values)
+- (−) Slightly more ceremony than `queryForList` — manual row iteration instead of one-liner
+- (−) `QueryResult` record touches multiple services (orchestrator, controller) — but the change is mechanical
+
+**Reversal trigger:** None expected. `ResultSetExtractor` is the correct Spring JDBC pattern when you need both metadata and rows from a single query execution.
+
+---
+
+## DL-011: Store Result Data in query_history (JSONB)
+
+**Date:** Day 3 (Implementation)
+**Context:** Insight generation needs the first 5 rows of query results. Options: store at query time or re-execute SQL at insight time.
+
+**Decision:** Add nullable `result_data` JSONB column to `query_history`. The orchestrator stores the first 5 rows at persist time. `InsightGenerationService` reads from this column — no dependency on `SqlExecutionService`.
+
+**Alternatives:**
+- **Re-execute stored SQL at insight time:** Avoids schema change, but adds 50-500ms latency (JOIN/GROUP BY re-execution), couples insight generation to the SQL execution pipeline, and breaks determinism if data changes between query and insight request.
+
+**Tradeoffs:**
+- (+) Zero additional latency for insights — data is already persisted
+- (+) Insight describes the results the user actually saw, not a re-execution that could differ
+- (+) `InsightGenerationService` has no dependency on `SqlExecutionService` — clean separation
+- (−) Storage growth (~500 bytes per row for 5 rows of JSON)
+- (−) Schema migration needed (one nullable JSONB column)
+
+**Reversal trigger:** If `result_data` storage becomes a space concern (unlikely — 500 bytes × thousands of queries is negligible) or if real-time re-execution is needed for mutable datasets.
+
+---
+
 *New decisions will be added during the build. The "Reversal trigger" section of each entry is especially important — it's a ready-made answer for "when would you change this decision?" in interviews.*

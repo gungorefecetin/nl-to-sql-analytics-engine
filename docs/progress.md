@@ -98,7 +98,7 @@ Also completed ahead of schedule:
 
 ---
 
-## Day 2 — [DATE]
+## Day 2 — 2026-04-13
 
 ### Plan
 **Objective:** NL-to-SQL core pipeline — OpenAI integration, validation, execution, first working query
@@ -119,23 +119,41 @@ Also completed ahead of schedule:
 - Frontend (Day 4)
 
 **Acceptance Criteria:**
-- [ ] `curl POST /api/query` with "How many orders in 2017?" → correct SQL → correct count
-- [ ] INSERT/DROP/DELETE statements blocked by validation
-- [ ] Query persisted in query_history table
-- [ ] Retry works when GPT-4o returns bad SQL
+- [x] `curl POST /api/query` with "How many orders in 2017?" → correct SQL → correct count
+- [x] INSERT/DROP/DELETE statements blocked by validation
+- [x] Query persisted in query_history table
+- [x] Retry works when GPT-4o returns bad SQL
 
 ### End of Day
 **Completed:**
-- [ ] *fill in at end of day*
+- [x] `POST /api/query` end-to-end works (integration test with mocked OpenAI: `SELECT COUNT(*) FROM olist_orders_dataset` → real PG execution → 200 response)
+- [x] INSERT/DROP/DELETE blocked (38 SqlValidationService unit tests, all green)
+- [x] Query persisted in `query_history` on every path (success: id=1, failure with error_message: id=2, both verified in DB)
+- [x] Retry logic implemented (multi-turn conversation history, max 2 retries, per DL-009)
+
+Files added (12 new, 3 modified):
+- `OpenAIClient` + `OpenAIClientException` + `OpenAIConfig` (RestClient-based GPT-4o caller with multi-turn support)
+- `SqlValidationService` + `UnsafeSqlException` (38 unit tests: blocked keywords, SELECT-only, semicolon stripping, length limit, false positive prevention)
+- `SqlExecutionService` + `SqlExecutionException` (readonly JdbcTemplate, 30s timeout, PG error extraction for retry loop)
+- `PromptBuilderService` (full schema in every prompt, sample value cardinality heuristic — DL-008)
+- `QueryOrchestrationService` (pipeline coordinator: prompt → OpenAI → validate → execute → persist, with retry loop)
+- `QueryController` + `QueryRequest` + `QueryResponse` DTOs
+- `QueryControllerIntegrationTest` (MockMvc + mocked OpenAI + real PG)
+- `pom.xml` updated: added `spring-boot-starter-validation`
+- `docker-compose.yml` updated: added `OPENAI_API_KEY` passthrough
 
 **Decisions Made:**
-- *fill in at end of day*
+- DL-007: Word-boundary regex for SQL keyword blocklist — `\bUPDATE\b` avoids false positives on column names like `updated_at`, `execution_time_ms`, `created_at`
+- DL-008: Full schema in every prompt, no retrieval/filtering — Olist is 9 tables / ~55 columns / ~2,500 tokens, strictly better to include everything than risk missing a table GPT-4o needs
+- DL-009: Multi-turn conversation history for retry loop — GPT-4o makes targeted surgical fixes when it sees its own prior output in the assistant role, rather than rewriting from scratch
 
 **Learned:**
-- *fill in at end of day*
+- Spring Boot 3.2's `RestClient` works well as a lightweight OpenAI integration — no SDK dependency needed. The fluent API handles JSON serialization via Jackson automatically, and error responses come back as exceptions with the full response body (which is how we got the clean `401 Unauthorized: { "error": ... }` message).
+- Naive `String.contains("UPDATE")` for SQL keyword blocking is a trap — real-world schemas have columns like `updated_at`, `execution_time_ms`, `created_at` that contain blocked keywords as substrings. Word-boundary regex (`\bUPDATE\b`) solves this with zero extra dependencies, but it's the kind of bug you'd only catch with tests against realistic column names.
+- `@MockBean` (Spring Boot 3.2) vs `@MockitoBean` (Spring Boot 3.4+) — the package moved from `org.springframework.boot.test.mock.mockito` to `org.springframework.test.context.bean.override.mockito`. Version-sensitive import that compile errors won't explain clearly.
 
 **Tomorrow:**
-- *fill in at end of day*
+- Day 3 — ChartTypeInferenceService, InsightGenerationService, `GET /api/query/history`, GlobalExceptionHandler, rate limiter, query timeout, Swagger UI verification
 
 ---
 

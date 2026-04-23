@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS query_history (
     result_row_count    INTEGER,
     execution_time_ms   INTEGER,
     error_message       TEXT,
+    result_data         JSONB,
     created_at          TIMESTAMP DEFAULT NOW()
 );
 
